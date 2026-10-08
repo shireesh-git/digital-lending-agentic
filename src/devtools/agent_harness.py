@@ -504,9 +504,13 @@ def _evaluate(name: str, data: dict, ctx: dict, extra: dict) -> list[dict]:
     elif name == "benchmark":
         latest = data.get("latest_benchmarks") or []
         sector = cd["borrower"].sector.value
-        checks.append(_check("Sector peer table", "pass" if latest else "fail",
+        from src.engines.benchmark_engine import SECTOR_BENCHMARKS
+        has_table = sector in SECTOR_BENCHMARKS
+        # No peer table for the sector is a data gap (warn), not a malfunction; peers from another sector are never used.
+        checks.append(_check("Sector peer table", "pass" if latest else ("fail" if has_table else "warn"),
                              f"{len(latest)} metric(s) benchmarked for '{sector}'" if latest
-                             else f"no peer table for '{sector}' — nothing benchmarked"))
+                             else (f"peer table for '{sector}' exists but nothing was benchmarked" if has_table
+                                   else f"no peer table for '{sector}' — benchmarking not available (no sourced peer data)")))
         worse = [b.metric for b in latest if b.status.value == "worse_than_peer"]
         checks.append(_check("Metrics worse than peers", "info", ", ".join(worse) or "none"))
         fa_reads = (extra.get("reads") or {}).get("financial_analysis") or {}
@@ -518,7 +522,8 @@ def _evaluate(name: str, data: dict, ctx: dict, extra: dict) -> list[dict]:
         tier1 = data.get("tier1_decisions") or []
         rs, rec = data.get("risk_score"), data.get("recommendation")
         checks.append(_check("Hard rules evaluated", "pass" if tier1 else "fail",
-                             f"{len(tier1)} rule(s), {sum(d.result == 'fail' for d in tier1)} failed"))
+                             f"{len(tier1)} rule(s), {sum(d.result == 'fail' for d in tier1)} failed, "
+                             f"{sum(d.result == 'not_verified' for d in tier1)} not verified"))
         checks.append(_check("Risk score", "pass" if rs else "fail",
                              f"composite {getattr(rs, 'composite_score', '?')} grade {getattr(rs, 'risk_grade', '?')} "
                              f"(financial {getattr(rs, 'financial_score', '?')}, conduct {getattr(rs, 'conduct_score', '?')}, "
@@ -526,9 +531,10 @@ def _evaluate(name: str, data: dict, ctx: dict, extra: dict) -> list[dict]:
         checks.append(_check("Recommendation", "pass" if rec else "fail",
                              f"{getattr(getattr(rec, 'recommendation', None), 'value', '?')} — "
                              f"{getattr(rec, 'rationale', '')[:120]}"))
-        fixed = [d.rule_code for d in tier1 if d.rule_code in ("HR_COMPANY_ACTIVE", "HR_KYC_COMPLETE")]
-        checks.append(_check("Hard-coded rules", "warn" if fixed else "pass",
-                             f"{', '.join(fixed)} always pass (not checked against data)" if fixed else "none"))
+        evidence = {d.rule_code: d for d in tier1 if d.rule_code in ("HR_COMPANY_ACTIVE", "HR_KYC_COMPLETE")}
+        unverified = [code for code, d in evidence.items() if d.result == "not_verified"]
+        checks.append(_check("Evidence-based hard rules", "warn" if unverified else "pass",
+                             "; ".join(f"{code} {d.result}: {d.details}" for code, d in evidence.items()) or "none"))
         bm = (ctx["results"].get("benchmark") or {})
         if not dict.get(bm, "latest_benchmarks"):
             checks.append(_check("Benchmark input", "warn", "no peer benchmarks — financial score is unbenchmarked"))

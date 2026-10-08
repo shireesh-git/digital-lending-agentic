@@ -75,19 +75,26 @@ def tier1_hard_rules(
     """
     decisions = []
     case_type_value = getattr(facility.case_type, "value", str(facility.case_type or ""))
+    bureau = (bureau_payload or {}).get("payload") or {}
+    no_bureau = "No bureau report available from submitted information"
+
+    def bureau_rule(code, description, field, failed, pass_details, fail_details):
+        """A rule on one bureau field: not_verified when the report or the field is absent."""
+        if field not in bureau:
+            result, details = NOT_VERIFIED, (no_bureau if not bureau else f"Bureau report does not state '{field}'")
+        else:
+            bad = failed(bureau[field])
+            result, details = ("fail", fail_details(bureau[field])) if bad else ("pass", pass_details(bureau[field]))
+        decisions.append(PolicyDecision(entity_id=borrower.entity_id, tier="tier1_hard_rules", rule_code=code,
+                                        rule_description=description, result=result, details=details))
 
     # Rule 1: No Wilful Defaulter
     wilful_cfg = _hard_rule_config("wilful_defaulter")
-    if wilful_cfg.get("enabled", True) and bureau_payload:
-        wd = bureau_payload.get("payload", {}).get("wilful_defaulter", False)
-        decisions.append(PolicyDecision(
-            entity_id=borrower.entity_id,
-            tier="tier1_hard_rules",
-            rule_code="HR_WILFUL_DEFAULTER",
-            rule_description=wilful_cfg.get("description", "Borrower must not be flagged as Wilful Defaulter"),
-            result="fail" if wd else "pass",
-            details="Public records show Wilful Defaulter flag" if wd else "Clear",
-        ))
+    if wilful_cfg.get("enabled", True):
+        bureau_rule("HR_WILFUL_DEFAULTER",
+                    wilful_cfg.get("description", "Borrower must not be flagged as Wilful Defaulter"),
+                    "wilful_defaulter", bool, lambda v: "Bureau: not flagged as wilful defaulter",
+                    lambda v: "Public records show Wilful Defaulter flag")
 
     # Rule 2: Company status must be Active
     company_active_cfg = _hard_rule_config("company_active")
@@ -136,18 +143,12 @@ def tier1_hard_rules(
 
     # Rule 5: Bureau SMA/NPA check
     bureau_cfg = _hard_rule_config("bureau_status")
-    if bureau_cfg.get("enabled", True) and bureau_payload:
-        dpd_status = bureau_payload.get("payload", {}).get("dpd_status", "Standard")
+    if bureau_cfg.get("enabled", True):
         blocked_statuses = tuple(bureau_cfg.get("blocked_statuses") or ("SMA-2", "Substandard", "Doubtful", "Loss"))
-        is_adverse = dpd_status in blocked_statuses
-        decisions.append(PolicyDecision(
-            entity_id=borrower.entity_id,
-            tier="tier1_hard_rules",
-            rule_code="HR_BUREAU_STATUS",
-            rule_description=bureau_cfg.get("description", "Public-record stress status must not be SMA-2 or worse"),
-            result="fail" if is_adverse else "pass",
-            details=f"Public-record DPD status: {dpd_status}",
-        ))
+        bureau_rule("HR_BUREAU_STATUS",
+                    bureau_cfg.get("description", "Public-record stress status must not be SMA-2 or worse"),
+                    "dpd_status", lambda v: v in blocked_statuses,
+                    lambda v: f"Public-record DPD status: {v}", lambda v: f"Public-record DPD status: {v}")
 
     # Rule 6: Minimum vintage for NTB
     vintage_cfg = _hard_rule_config("min_vintage")
@@ -166,42 +167,23 @@ def tier1_hard_rules(
         ))
 
     # Rule 7: RBI fraud registry check
-    if bureau_payload:
-        fraud = bureau_payload.get("payload", {}).get("fraud_flag", False)
-        decisions.append(PolicyDecision(
-            entity_id=borrower.entity_id,
-            tier="tier1_hard_rules",
-            rule_code="HR_FRAUD_REGISTRY",
-            rule_description="Borrower must not be flagged in fraud registry (RBI CFMC)",
-            result="fail" if fraud else "pass",
-            details="Fraud flag detected in bureau" if fraud else "Clear — no fraud flag",
-        ))
+    bureau_rule("HR_FRAUD_REGISTRY", "Borrower must not be flagged in fraud registry (RBI CFMC)", "fraud_flag", bool,
+                lambda v: "Bureau: no fraud flag", lambda v: "Fraud flag detected in bureau")
 
     # Rule 8: RBI defaulter list check
-    if bureau_payload:
-        rbi_default = bureau_payload.get("payload", {}).get("rbi_defaulter_list", False)
-        decisions.append(PolicyDecision(
-            entity_id=borrower.entity_id,
-            tier="tier1_hard_rules",
-            rule_code="HR_RBI_DEFAULTER",
-            rule_description="Borrower must not be on RBI defaulter list",
-            result="fail" if rbi_default else "pass",
-            details="On RBI defaulter list" if rbi_default else "Clear",
-        ))
+    bureau_rule("HR_RBI_DEFAULTER", "Borrower must not be on RBI defaulter list", "rbi_defaulter_list", bool,
+                lambda v: "Bureau: not on RBI defaulter list", lambda v: "On RBI defaulter list")
 
     # Rule 9: Suit filed amount check (significant litigation)
-    if bureau_payload:
-        suit_amt = bureau_payload.get("payload", {}).get("suit_filed_amount_cr", 0)
-        total_exp = bureau_payload.get("payload", {}).get("total_exposure_cr", 1)
-        suit_pct = (suit_amt / total_exp * 100) if total_exp > 0 else 0
-        decisions.append(PolicyDecision(
-            entity_id=borrower.entity_id,
-            tier="tier1_hard_rules",
-            rule_code="HR_SUIT_FILED",
-            rule_description="Suit-filed amount must be < 25% of total exposure",
-            result="fail" if suit_pct > 25 else "pass",
-            details=f"Suit filed: ₹{suit_amt:.1f} Cr ({suit_pct:.1f}% of exposure)",
-        ))
+    total_exp = bureau.get("total_exposure_cr") or 0
+
+    def suit_pct(amount):
+        return (amount / total_exp * 100) if total_exp > 0 else 0
+
+    bureau_rule("HR_SUIT_FILED", "Suit-filed amount must be < 25% of total exposure", "suit_filed_amount_cr",
+                lambda v: suit_pct(v or 0) > 25,
+                lambda v: f"Suit filed: ₹{(v or 0):.1f} Cr ({suit_pct(v or 0):.1f}% of exposure)",
+                lambda v: f"Suit filed: ₹{(v or 0):.1f} Cr ({suit_pct(v or 0):.1f}% of exposure)")
 
     return decisions
 

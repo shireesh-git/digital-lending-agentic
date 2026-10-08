@@ -130,8 +130,8 @@ CONTRACTS = {
                       "risk_score": ["case record (build_case_result)"],
                       "recommendation": ["case record (build_case_result)"],
                       "tier1_decisions": ["case record (build_case_result)"], "collateral_coverage": []},
-        "notes": ["HR_COMPANY_ACTIVE and HR_KYC_COMPLETE always pass (hard-coded); MCA status and KYC documents are "
-                  "not checked."],
+        "notes": ["HR_COMPANY_ACTIVE (MCA status) and HR_KYC_COMPLETE (document inventory) are evidence-based: "
+                  "pass / fail / not_verified; a not-verified rule blocks approval (refer)."],
     },
     "narrative": {
         "purpose": "Build the fact pack and write the CAM.",

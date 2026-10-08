@@ -9,7 +9,7 @@
   "latest_metrics": {
     "ebitda_cr": 268.0, "operating_cash_flow_cr": 45.0, "ocf_to_ebitda_pct": 16.8, "finance_cost_cr": 88.0,
     "ocf_to_interest": 0.51, "total_debt_cr": 1100.0, "debt_to_ebitda": 4.1, "interest_coverage_ratio": 2.34,
-    "dscr": 1.19, "ocf_to_debt": 4.0, "capex_cr": 410.0, "free_cash_flow_cr": -365.0
+    "dscr": 1.19, "ocf_to_debt": 4.1, "capex_cr": 410.0, "free_cash_flow_cr": -365.0
   },
   "concerns": [
     "Operating cash flow declining despite EBITDA growth",

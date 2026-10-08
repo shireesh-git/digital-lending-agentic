@@ -211,7 +211,14 @@ class TestPolicyEngine:
             case_type=co["facility"].case_type,
         )
 
-        t1 = tier1_hard_rules(b, co["facility"], exceptions, bureau)
+        # Hard rules are evidence-based: KYC needs the document inventory, company status the MCA status.
+        evidence = {"document_inventory": {"has_kyc": True, "kyc_files": ["pan_card.pdf"], "source": "test"},
+                    "mca_status": "Active"}
+        # The mock bureau returns "not_found" (empty payload); supply a clean report as the bureau evidence.
+        clean_bureau = {"payload": {"wilful_defaulter": False, "dpd_status": "Standard", "fraud_flag": False,
+                                    "rbi_defaulter_list": False, "suit_filed_amount_cr": 0.0, "total_exposure_cr": 100.0}}
+        t1 = tier1_hard_rules(b, co["facility"], exceptions, bureau if (bureau or {}).get("payload") else clean_bureau,
+                              **evidence)
 
         mp = compute_multi_period_ratios(co["financials"])
         bm_all = benchmark_all_periods(b.entity_id, b.sector, co["financials"])
@@ -236,6 +243,11 @@ class TestPolicyEngine:
 
         t3 = tier3_recommendation(t1, t2, exceptions, co["facility"], cov)
         return t1, t2, t3
+
+    def test_hard_rules_without_evidence_are_not_verified(self):
+        co = _co("BMFG001")
+        t1 = {d.rule_code: d.result for d in tier1_hard_rules(co["borrower"], co["facility"], [], {})}
+        assert t1["HR_KYC_COMPLETE"] == "not_verified" and t1["HR_COMPANY_ACTIVE"] == "not_verified"
 
     def test_bharat_mfg_approved(self):
         t1, t2, t3 = self._run_policy("BMFG001")
